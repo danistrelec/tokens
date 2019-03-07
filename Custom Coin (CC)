@@ -1,0 +1,465 @@
+   
+pragma solidity ^0.4.16;
+
+/**
+ * @title ERC20Basic
+ * @dev Simpler version of ERC20 interface
+ * @dev see https://github.com/ethereum/EIPs/issues/179
+ */
+contract ERC20Basic {
+  uint256 public totalSupply;
+  function balanceOf(address who) constant returns (uint256);
+  function transfer(address to, uint256 value) returns (bool);
+  event Transfer(address indexed from, address indexed to, uint256 value);
+}
+
+/**
+ * @title ERC20 interface
+ * @dev see https://github.com/ethereum/EIPs/issues/20
+ */
+contract ERC20 is ERC20Basic {
+  function allowance(address owner, address spender) constant returns (uint256);
+  function transferFrom(address from, address to, uint256 value) returns (bool);
+  function approve(address spender, uint256 value) returns (bool);
+  event Approval(address indexed owner, address indexed spender, uint256 value);
+}
+
+/**
+ * @title SafeMath
+ * @dev Math operations with safety checks that throw on error
+ */
+library SafeMath {
+    
+  function mul(uint256 a, uint256 b) internal constant returns (uint256) {
+    uint256 c = a * b;
+    assert(a == 0 || c / a == b);
+    return c;
+  }
+
+  function div(uint256 a, uint256 b) internal constant returns (uint256) {
+    // assert(b > 0); // Solidity automatically throws when dividing by 0
+    uint256 c = a / b;
+    // assert(a == b * c + a % b); // There is no case in which this doesn't hold
+    return c;
+  }
+
+  function sub(uint256 a, uint256 b) internal constant returns (uint256) {
+    assert(b <= a);
+    return a - b;
+  }
+
+  function add(uint256 a, uint256 b) internal constant returns (uint256) {
+    uint256 c = a + b;
+    assert(c >= a);
+    return c;
+  }
+  
+  function per(uint256 a, uint256 b) internal constant returns (uint256) {
+      uint256 c = a * b / 100;
+      return c;
+  }
+  
+}
+
+library StringUtils {
+    /// @dev Does a byte-by-byte lexicographical comparison of two strings.
+    /// @return a negative number if `_a` is smaller, zero if they are equal
+    /// and a positive numbe if `_b` is smaller.
+    function compare(string _a, string _b) returns (int) {
+        bytes memory a = bytes(_a);
+        bytes memory b = bytes(_b);
+        uint minLength = a.length;
+        if (b.length < minLength) minLength = b.length;
+        //@todo unroll the loop into increments of 32 and do full 32 byte comparisons
+        for (uint i = 0; i < minLength; i ++)
+            if (a[i] < b[i])
+                return -1;
+            else if (a[i] > b[i])
+                return 1;
+        if (a.length < b.length)
+            return -1;
+        else if (a.length > b.length)
+            return 1;
+        else
+            return 0;
+    }
+    /// @dev Compares two strings and returns true iff they are equal.
+    function equal(string _a, string _b) returns (bool) {
+        return compare(_a, _b) == 0;
+    }
+    /// @dev Finds the index of the first occurrence of _needle in _haystack
+    function indexOf(string _haystack, string _needle) returns (int)
+    {
+    	bytes memory h = bytes(_haystack);
+    	bytes memory n = bytes(_needle);
+    	if(h.length < 1 || n.length < 1 || (n.length > h.length)) 
+    		return -1;
+    	else if(h.length > (2**128 -1)) // since we have to be able to return -1 (if the char isn't found or input error), this function must return an "int" type with a max length of (2^128 - 1)
+    		return -1;									
+    	else
+    	{
+    		uint subindex = 0;
+    		for (uint i = 0; i < h.length; i ++)
+    		{
+    			if (h[i] == n[0]) // found the first char of b
+    			{
+    				subindex = 1;
+    				while(subindex < n.length && (i + subindex) < h.length && h[i + subindex] == n[subindex]) // search until the chars don't match or until we reach the end of a or b
+    				{
+    					subindex++;
+    				}	
+    				if(subindex == n.length)
+    					return int(i);
+    			}
+    		}
+    		return -1;
+    	}	
+    }
+}
+
+/**
+ * @title Basic token
+ * @dev Basic version of StandardToken, with no allowances. 
+ */
+contract BasicToken is ERC20Basic {
+    
+  using SafeMath for uint256;
+
+  mapping(address => uint256) balances;
+
+  /**
+  * @dev transfer token for a specified address
+  * @param _to The address to transfer to.
+  * @param _value The amount to be transferred.
+  */
+  function transfer(address _to, uint256 _value) returns (bool) {
+    balances[msg.sender] = balances[msg.sender].sub(_value);
+    balances[_to] = balances[_to].add(_value);
+    Transfer(msg.sender, _to, _value);
+    return true;
+  }
+
+  /**
+  * @dev Gets the balance of the specified address.
+  * @param _owner The address to query the the balance of. 
+  * @return An uint256 representing the amount owned by the passed address.
+  */
+  function balanceOf(address _owner) constant returns (uint256 balance) {
+    return balances[_owner];
+  }
+
+}
+
+/**
+ * @title Standard ERC20 token
+ *
+ * @dev Implementation of the basic standard token.
+ * @dev https://github.com/ethereum/EIPs/issues/20
+ * @dev Based on code by FirstBlood: https://github.com/Firstbloodio/token/blob/master/smart_contract/FirstBloodToken.sol
+ */
+contract StandardToken is ERC20, BasicToken {
+
+  mapping (address => mapping (address => uint256)) allowed;
+
+  /**
+   * @dev Transfer tokens from one address to another
+   * @param _from address The address which you want to send tokens from
+   * @param _to address The address which you want to transfer to
+   * @param _value uint256 the amout of tokens to be transfered
+   */
+  function transferFrom(address _from, address _to, uint256 _value) returns (bool) {
+    var _allowance = allowed[_from][msg.sender];
+
+    // Check is not needed because sub(_allowance, _value) will already throw if this condition is not met
+    // require (_value <= _allowance);
+
+    balances[_to] = balances[_to].add(_value);
+    balances[_from] = balances[_from].sub(_value);
+    allowed[_from][msg.sender] = _allowance.sub(_value);
+    Transfer(_from, _to, _value);
+    return true;
+  }
+
+  /**
+   * @dev Aprove the passed address to spend the specified amount of tokens on behalf of msg.sender.
+   * @param _spender The address which will spend the funds.
+   * @param _value The amount of tokens to be spent.
+   */
+  function approve(address _spender, uint256 _value) returns (bool) {
+
+    // To change the approve amount you first have to reduce the addresses`
+    //  allowance to zero by calling `approve(_spender, 0)` if it is not
+    //  already 0 to mitigate the race condition described here:
+    //  https://github.com/ethereum/EIPs/issues/20#issuecomment-263524729
+    require((_value == 0) || (allowed[msg.sender][_spender] == 0));
+
+    allowed[msg.sender][_spender] = _value;
+    Approval(msg.sender, _spender, _value);
+    return true;
+  }
+
+  /**
+   * @dev Function to check the amount of tokens that an owner allowed to a spender.
+   * @param _owner address The address which owns the funds.
+   * @param _spender address The address which will spend the funds.
+   * @return A uint256 specifing the amount of tokens still available for the spender.
+   */
+  function allowance(address _owner, address _spender) constant returns (uint256 remaining) {
+    return allowed[_owner][_spender];
+  }
+
+}
+
+/**
+ * @title Ownable
+ * @dev The Ownable contract has an owner address, and provides basic authorization control
+ * functions, this simplifies the implementation of "user permissions".
+ */
+contract Ownable {
+    
+  address public owner;
+
+  /**
+   * @dev The Ownable constructor sets the original `owner` of the contract to the sender
+   * account.
+   */
+  function Ownable() {
+    owner = msg.sender;
+  }
+
+  /**
+   * @dev Throws if called by any account other than the owner.
+   */
+  modifier onlyOwner() {
+    require(msg.sender == owner);
+    _;
+  }
+
+  /**
+   * @dev Allows the current owner to transfer control of the contract to a newOwner.
+   * @param newOwner The address to transfer ownership to.
+   */
+  function transferOwnership(address newOwner) onlyOwner {
+    require(newOwner != address(0));      
+    owner = newOwner;
+  }
+
+}
+
+/**
+ * @title Burnable Token
+ * @dev Token that can be irreversibly burned (destroyed).
+ */
+contract BurnableToken is StandardToken, Ownable {
+
+  /**
+   * @dev Burns a specific amount of tokens.
+   * @param _value The amount of token to be burned.
+   */
+  function burn(uint _value) public onlyOwner {
+    require(_value > 0);
+    address burner = msg.sender;
+    balances[burner] = balances[burner].sub(_value);
+    totalSupply = totalSupply.sub(_value);
+    Burn(burner, _value);
+  }
+
+  event Burn(address indexed burner, uint indexed value);
+
+}
+
+contract SimpleCoinToken is BurnableToken {
+    
+  string public constant name = "Custom Coin";
+   
+  string public constant symbol = "CC";
+    
+  uint32 public constant decimals = 0;
+
+  uint256 public INITIAL_SUPPLY = 100000000;
+
+  function SimpleCoinToken() {
+    totalSupply = INITIAL_SUPPLY;
+    balances[msg.sender] = INITIAL_SUPPLY;
+  }
+  
+}
+
+contract Crowdsale is SimpleCoinToken {
+    
+  using SafeMath for uint;
+  
+  using StringUtils for string;
+  
+  address multisig;
+
+  uint restrictedPercent;
+
+  address restricted;
+
+  uint startSale;
+  
+  uint startPreSale;
+  
+  uint discount;
+  
+  string currentStage;
+    
+  uint period;
+
+  uint price;
+  
+  uint totalBountyTokens;
+  
+  uint distributedBountyTokens;
+  
+  uint minTransaction;
+  
+  uint maxTransaction;
+  
+  bool finishSaleToken;
+  
+  function Crowdsale() {
+    multisig = 0x0DC7974A0F92c56dc0aB6eFd478Df5E9442b3ac9;
+    restricted = 0xaAa25E5a459154FAcd6b9011aE599D5E26273d46;
+    restrictedPercent = 8;
+    price = 2500;
+    startSale = 1529631600;
+    startPreSale = 1529625600;
+    period = 30;
+    totalBountyTokens = 3000000;
+    minTransaction = 0;
+    maxTransaction = 50;
+    currentStage = "PreSale";
+    discount = 15;
+    finishSaleToken = false;
+    
+    restrictedTokens();
+    setCurrentStage();
+  }
+  
+  function getStage() public returns (string) {
+      setCurrentStage();
+      return currentStage;
+  }
+  
+  function setStartSale(uint newStartSale) onlyOwner updateCurrentStage {
+    startSale = newStartSale;
+  }
+  
+  
+  function setStartPreSale(uint newStartPreSale) onlyOwner updateCurrentStage {
+    startPreSale = newStartPreSale;
+  }
+  
+  function setMinTransaction(uint newMinTransaction) onlyOwner {
+    minTransaction = newMinTransaction;
+  }
+  
+   function setMaxTransaction(uint newMaxTransaction) onlyOwner {
+    maxTransaction = newMaxTransaction;
+  }
+  
+  function setPrice(uint newPrice) onlyOwner {
+    price = newPrice;
+  }
+  
+  function setDiscount(uint newDiscount) onlyOwner {
+    discount = newDiscount;
+  }
+  
+  function setPeriod(uint newPeriod) onlyOwner {
+    period = newPeriod;
+  }
+  
+  function setCurrentStage() public {
+    if (now > startPreSale && now < startPreSale + period * 1 days) {
+        currentStage = "PreSale";
+    } else if (now > startSale && now < startSale + period * 1 days) {
+        currentStage = "Sale";
+    } else {
+        currentStage = "";
+    }
+  }
+  
+  modifier updateCurrentStage() {
+    setCurrentStage();
+    _;
+  }
+
+  modifier preSaleOrSaleIsOn() {
+    require(currentStage.equal("PreSale") || currentStage.equal("Sale"));
+    _;
+  }
+  
+  modifier checkFinishSale() {
+    require(finishSaleToken != true);
+    _;
+  }
+  
+  modifier isUnderBuyTokens() {
+    require(balances[owner] > totalBountyTokens);
+    _;
+  }
+  
+  function restrictedTokens() private onlyOwner {
+    uint restrictedTokens = totalSupply.mul(restrictedPercent).div(100);
+    transfer(restricted, restrictedTokens);
+  }
+  
+  function bytesToAddress(bytes source) internal constant returns(address parsedReferer) {
+    assembly {
+      parsedReferer := mload(add(source,0x14))
+    }
+    return parsedReferer;
+  }
+  
+  function transferSaleToken(address _to, uint256 _value) private returns (bool) {
+    balances[owner] = balances[owner].sub(_value);
+    balances[_to] = balances[_to].add(_value);
+    Transfer(owner, _to, _value);
+    return true;
+  }
+
+  function sendTokens() payable isUnderBuyTokens preSaleOrSaleIsOn checkFinishSale {
+    uint comeEth = msg.value.div(1 ether);
+    multisig.transfer(msg.value);
+    uint tokens;
+    
+    if (currentStage.equal("PreSale")) {
+        require(comeEth >= minTransaction && comeEth <= maxTransaction);
+        uint priceSale = price.mul(100 + discount).div(100);
+        tokens = priceSale.mul(msg.value).div(1 ether);
+    } else {
+        require(comeEth >= minTransaction);
+        tokens = price.mul(msg.value).div(1 ether);
+    }
+    
+    transferSaleToken(msg.sender, tokens);
+    
+    if(msg.data.length == 20) {
+      require(distributedBountyTokens < totalBountyTokens);
+      address referer = bytesToAddress(bytes(msg.data));
+      require(referer != msg.sender);
+      distributedBountyTokens += 250;
+      transfer(referer, 250);
+      distributedBountyTokens += 250;
+      transfer(msg.sender, 250);
+    }
+  }
+  
+  function finishSale() onlyOwner {
+      uint bountyToken =  totalBountyTokens.sub(distributedBountyTokens);
+      
+      if (bountyToken > 0) {
+          transfer(restricted, bountyToken);
+      }
+      
+      burn(balances[msg.sender]);
+  }
+
+  function() external isUnderBuyTokens payable {
+    sendTokens();
+  }
+    
+}
